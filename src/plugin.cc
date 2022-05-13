@@ -29,8 +29,20 @@ static bool virtualcam_start(void *data) {
     uint32_t width = obs_output_get_width(plugin->output);
     uint32_t height = obs_output_get_height(plugin->output);
 
+    struct obs_video_info ovi;
+    obs_get_video_info(&ovi);
+
+    uint64_t interval = ovi.fps_den * 10000000ULL / ovi.fps_num;
+    plugin->vq = video_queue_create(width, height, interval);
     // FIXME.. continue here
 
+    struct video_scale_info vsi = {0};
+    vsi.format = VIDEO_FORMAT_I420;
+    vsi.width  = width;
+    vsi.height = height;
+    obs_output_set_video_conversion(plugin->output, &vsi);
+
+    obs_output_begin_data_capture(plugin->output, 0);
     ilog("output started")
     return true;
 }
