@@ -14,15 +14,10 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-#define _WIN32_WINNT 0x0501
-#define _WIN32_IE    0x0500
-#define _WIN32_DCOM
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <cmath>
-
 #include "plugin.h"
 #include "structs.h"
+
+#include <cmath>
 
 const char *PluginVer  = "001";
 const char *PluginName = "DroidCam Virtual Output";
@@ -34,6 +29,8 @@ void scale_yuv420_yuyv(uint8_t** data, uint32_t *linesize, uint8_t* dst,
     const int src_w, const int src_h,
     const int dst_w, const int dst_h,
     int shift_x, int shift_y);
+
+void clear_yuyv(uint8_t* dst, int size, int color);
 
 enum ScaleType {
     MATCH = 0,
@@ -51,12 +48,13 @@ struct droidcam_output_plugin {
 
     obs_output_t *output;
 
-    // Windows
+    #ifdef _WIN32
     VideoHeader *pVideoHeader;
     BYTE        *pVideoData;
 
     LPVOID pVideoMem;
     HANDLE hVideoMapping;
+    #endif
 };
 
 static void get_webcam_size(droidcam_output_plugin *plugin) {
@@ -116,7 +114,7 @@ static void get_webcam_size(droidcam_output_plugin *plugin) {
     plugin->shift_x = shift_x;
     plugin->shift_y = shift_y;
     plugin->scale_type = ScaleType::SCALE;
-    dlog("video will be scaled: %dx%d -> %dx%d at %d,%d",
+    ilog("video will be scaled: %dx%d -> %dx%d at %d,%d",
         src_w, src_h, dst_w, dst_h, shift_x, shift_y);
     return;
 }
@@ -152,6 +150,19 @@ static bool output_start(void *data) {
     obs_output_set_video_conversion(plugin->output, &plugin->video_conv);
     get_webcam_size(plugin);
 
+    #ifdef _WIN32
+    if (plugin->scale_type != ScaleType::MATCH) {
+        const LPCWSTR path = REG_WEBCAM_SIZE_KEY;
+        const LPCWSTR entry = REG_WEBCAM_SIZE_VAL;
+        int index = WebcamIndexFromSize(width, height);
+        if (GetRegValInt(path, entry) != index) {
+            SetRegValInt(path, entry, index);
+        }
+    }
+
+    clear_yuyv(plugin->pVideoData, MAX_WIDTH*MAX_HEIGHT*2, 0x80008000);
+    #endif
+
     obs_output_begin_data_capture(plugin->output, 0);
     ilog("output started");
     return true;
@@ -171,6 +182,7 @@ static void output_destroy(void *data) {
     droidcam_output_plugin *plugin = reinterpret_cast<droidcam_output_plugin *>(data);
 
     if (plugin) {
+        #ifdef _WIN32
         plugin->pVideoData = NULL;
         plugin->pVideoHeader = NULL;
         if (plugin->pVideoMem) {
@@ -178,6 +190,7 @@ static void output_destroy(void *data) {
             UnmapViewOfFile(plugin->pVideoMem);
             CloseHandle(plugin->hVideoMapping);
         }
+        #endif
 
         delete plugin;
     }
@@ -189,77 +202,51 @@ static void *output_create(obs_data_t *settings, obs_output_t *output) {
     plugin->output = output;
     plugin->scale_type = ScaleType::UNK;
 
-    const char* name = VIDEO_MAP_NAME;
+    #ifdef _WIN32
+    const LPCWSTR name = VIDEO_MAP_NAME;
     DWORD size = VIDEO_MAP_SIZE;
     ALIGN_SIZE(size, ALIGNMENT);
 
-    dlog("mapping memory");
-    plugin->hVideoMapping = CreateFileMappingA(
-        INVALID_HANDLE_VALUE,   // use paging file
-        NULL,                   // security attributes
-        PAGE_READWRITE,
-        0,                      // size: high 32-bits
-        size,                   // size: low 32-bits
-        name);
-
-    if (plugin->hVideoMapping == NULL) {
-        elog("CreateFileMapping Failed !! ");
-        goto EARLY_OUT;
+    if (CreateSharedMem(&plugin->hVideoMapping, &plugin->pVideoMem, name, size)) {
+        dlog("mapped %d bytes @ %p", size, plugin->pVideoMem);
+        plugin->pVideoHeader = (VideoHeader *) plugin->pVideoMem;
+        plugin->pVideoData   = (BYTE*)plugin->pVideoMem + sizeof(VideoHeader);
     }
+    #endif // _WIN32
 
-    plugin->pVideoMem = MapViewOfFile(
-        plugin->hVideoMapping,
-        FILE_MAP_WRITE,
-        0,0,0);
-
-
-    if (plugin->pVideoMem == NULL) {
-        elog("MapViewOfFile Failed !! ");
-        CloseHandle(plugin->hVideoMapping);
-        plugin->hVideoMapping = NULL;
-        goto EARLY_OUT;
-    }
-
-    dlog("mapped %d bytes @ %p", size, plugin->pVideoMem);
-    plugin->pVideoHeader = (VideoHeader *) plugin->pVideoMem;
-    plugin->pVideoData   = (BYTE*)plugin->pVideoMem + sizeof(VideoHeader);
-
-EARLY_OUT:
     UNUSED_PARAMETER(settings);
     return plugin;
 }
 
 static void on_video(void *data, struct video_data *frame) {
     droidcam_output_plugin *plugin = reinterpret_cast<droidcam_output_plugin *>(data);
-    if (!plugin->pVideoData)
+    if (plugin->pVideoData == false)
         return;
+
+    if (plugin->scale_type == ScaleType::UNK) {
+        get_webcam_size(plugin);
+        return;
+    }
 
     int src_w = plugin->video_conv.width;
     int src_h = plugin->video_conv.height;
     uint8_t* dst = plugin->pVideoData;
 
     // FIXME lock()
-    switch (plugin->scale_type) {
-        case ScaleType::MATCH:
-            convert_yuv420_yuyv(frame->data, frame->linesize, dst, src_w, src_h);
-            break;
 
-        case ScaleType::SCALE:
-            scale_yuv420_yuyv(frame->data, frame->linesize, dst,
-                src_w, src_h, plugin->dst_w, plugin->dst_h,
-                plugin->shift_x, plugin->shift_y);
+    if (plugin->pVideoHeader->info.control != CONTROL) {
+        dlog("webcam became inactive");
+        plugin->scale_type = ScaleType::UNK;
+        return;
+    }
 
-            // Check for webcam re-starts
-            // Webcam resolution should match our output size once re-opened
-            if (plugin->pVideoHeader->info.control != CONTROL) {
-                dlog("webcam became inactive");
-                plugin->scale_type = ScaleType::UNK;
-            }
-            break;
-
-        case ScaleType::UNK:
-            get_webcam_size(plugin);
-            break;
+    if (plugin->scale_type == ScaleType::MATCH) {
+        convert_yuv420_yuyv(frame->data, frame->linesize, dst, src_w, src_h);
+    }
+    else if (plugin->scale_type == ScaleType::SCALE) {
+        scale_yuv420_yuyv(frame->data, frame->linesize, dst,
+            src_w, src_h, plugin->dst_w, plugin->dst_h,
+            plugin->shift_x, plugin->shift_y);
     }
 }
 
