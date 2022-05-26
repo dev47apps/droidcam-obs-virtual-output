@@ -83,49 +83,6 @@ void convert_yuv420_yuyv(uint8_t** data, uint32_t *linesize,
     #endif
 }
 
-void scale_yuv420_yuyv(uint8_t** data, uint32_t *linesize, uint8_t* dst,
-    const int src_w, const int src_h,
-    const int dst_w, const int dst_h,
-    int shift_x, int shift_y)
-{
-    const uint8_t* src_y = data[0];
-    const uint8_t* src_u = data[1];
-    const uint8_t* src_v = data[2];
-
-    const int src_w_d4 = src_w >> 2;
-    const int src_h_d4 = src_h >> 2;
-    const int dst_w_d4 = dst_w >> 2;
-    const int dst_h_d4 = dst_h >> 2;
-    register int uv_flip = 0;
-
-    if (shift_x) {
-        shift_x &= ~1; // force even
-        shift_x <<= 1;
-    }
-
-    if (shift_y) {
-        shift_y &= ~1;
-        dst += (shift_y * dst_w ) << 1;
-    }
-
-    for (int y = 0; y < dst_h; y++) {
-        const int src_line     = (y   ) * src_h    / dst_h    * src_w;
-        const int src_line_d4  = (y>>2) * src_h_d4 / dst_h_d4 * src_w;
-        dst += shift_x;
-
-        for (int x = 0; x < dst_w; x++) {
-            const int src_x    = (x   ) * src_w    / dst_w;
-            const int src_x_d4 = (x>>2) * src_w_d4 / dst_w_d4;
-
-            const uint8_t* src_uv = uv_flip ? src_v : src_u;
-            *(dst++) = src_y  [src_line    + (src_x      )];
-            *(dst++) = src_uv [src_line_d4 + (src_x_d4<<1)];
-            uv_flip ^= 1;
-        }
-        dst += shift_x;
-    }
-}
-
 void clear_yuyv(uint8_t* dst, int size, int color) {
     int* ptr = (int*)dst;
     for (int i = 0; i < size / sizeof(int); i++) {

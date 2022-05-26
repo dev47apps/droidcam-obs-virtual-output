@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "plugin.h"
-#pragma comment(lib, "advapi32")
+// #pragma comment(lib, "advapi32")
 
 bool CreateSharedMem(LPHANDLE phFileMapping, LPVOID* ppSharedMem,
     const LPCWSTR name, DWORD size)
@@ -45,6 +45,7 @@ bool CreateSharedMem(LPHANDLE phFileMapping, LPVOID* ppSharedMem,
     return true;
 }
 
+#if 0
 int GetRegValInt(const LPCWSTR path, const LPCWSTR entry) {
     HKEY key;
     DWORD data = 0;
@@ -71,3 +72,4 @@ void SetRegValInt(const LPCWSTR path, const LPCWSTR entry, int data) {
         RegCloseKey(key);
     }
 }
+#endif

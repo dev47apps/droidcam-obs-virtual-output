@@ -16,13 +16,16 @@
 
 
 #define AUDIO_MAP_NAME L"DroidCamOBS_AudioOut0"
-#define VIDEO_MAP_NAME L"DroidCamOBS_VideoOut0"
+
+#define VIDEO_MAP_NAME     L"DroidCamOBS_VideoOut0"
+#define VIDEO_WR_LOCK_NAME L"DroidCamOBS_VideoWr0"
+#define VIDEO_RD_LOCK_NAME L"DroidCamOBS_VideoRd0"
 
 #define REG_WEBCAM_SIZE_KEY  L"SOFTWARE\\DroidCam"
 #define REG_WEBCAM_SIZE_VAL  L"Size"
 
-
-typedef struct smvi_s {
+/* Video Header */
+typedef struct {
     int version;
     int control;
     int checksum;
@@ -31,10 +34,24 @@ typedef struct smvi_s {
     int format;
 } DroidCamVideoInfo;
 
-typedef struct smh_s {
+typedef struct {
     DroidCamVideoInfo info;
     char reserved0[1024 - sizeof(DroidCamVideoInfo)];
 } VideoHeader;
+
+/* Audio Header */
+typedef struct {
+    int version;
+    int control;
+    int checksum;
+    int sample_rate;
+    int channels;
+} DroidCamAudioInfo;
+
+typedef struct {
+    DroidCamAudioInfo info;
+    char reserved0[1024 - sizeof(DroidCamAudioInfo)];
+} AudioHeader;
 
 // See also dshow CRefTime
 #define MS_TO_100NS_UNITS(ms) ((ms) * (UNITS / MILLI_SEC))
@@ -43,21 +60,3 @@ enum RefTime {
     NANO_SEC  = 1000000000ULL, // 10 ^ 9
     UNITS = NANO_SEC/100,      // 10 ^ 7
 };
-
-#define WEBCAM_SIZE_COUNT 4
-static const int WEBCAM_SIZE_MAP[WEBCAM_SIZE_COUNT][2] = {
-    {  640, 480 },
-    {  960, 720 },
-    { 1280, 720 },
-    { 1920,1080 },
-};
-
-static int WebcamIndexFromSize(int width, int height) {
-    int index = WEBCAM_SIZE_COUNT;
-    for (; index > 0; --index) {
-        if (WEBCAM_SIZE_MAP[index][0] == width
-            && WEBCAM_SIZE_MAP[index][1] == height)
-            break;
-    }
-    return index;
-}
