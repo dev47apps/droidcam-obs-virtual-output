@@ -25,18 +25,32 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <x86intrin.h>
 #endif
 
-void convert_yuv420_yuyv(uint8_t** data, uint32_t *linesize,
-    uint8_t* dst, const int width, const int height)
+void map_yuv420_yuyv(uint8_t** data, uint32_t *linesize, uint8_t* dst,
+    int shift_x, int shift_y,
+    const int dest_width, const int dest_height,
+    const int width, const int height)
 {
     uint8_t* src_y = data[0];
     uint8_t* src_u = data[1];
     uint8_t* src_v = data[2];
     const int linesize_dst = width<<1;
+    (void) dest_height;
+
+    if (shift_x) {
+        shift_x &= ~1; // make even
+        shift_x <<= 1;
+    }
+
+    if (shift_y) {
+        shift_y &= ~1;
+        dst += (shift_y * dest_width) << 1;
+    }
 
     // Each row N and N+1 use the same UV values (4:2:0 -> 4:2:2)
     #ifdef __SSE2__
     for (int y = 0; y < (height>>1); ++y) {
         #define CONVERT_ROW \
+        if (shift_x) dst += shift_x; \
         for (int x = 0; x < width; x += 16) {        \
             __m128i y = _mm_load_si128((__m128i*)(src_y + x));    \
             __m128i u = _mm_loadl_epi64((__m128i*)(src_u + (x>>1))); \
@@ -48,7 +62,8 @@ void convert_yuv420_yuyv(uint8_t** data, uint32_t *linesize,
             _mm_stream_si128((__m128i*)(dst + (x<<1)), yuv0);      \
             \
             _mm_stream_si128((__m128i*)(dst + (x<<1) + 16), yuv1); \
-        }
+        } \
+        if (shift_x) dst += shift_x;
 
 
         CONVERT_ROW
@@ -63,17 +78,18 @@ void convert_yuv420_yuyv(uint8_t** data, uint32_t *linesize,
     }
     #else // not __SSE2__
     for (int y = 0; y < (height>>1); y++) {
-        const uint8_t* src_u0 = src_u;
-        const uint8_t* src_v0 = src_v;
-
         #define CONVERT_ROW \
+        if (shift_x) dst += shift_x; \
         for (int x = 0; x < (width>>1); x++) { \
             *dst++ = *src_y++; \
             *dst++ = *src_u++; \
             *dst++ = *src_y++; \
             *dst++ = *src_v++; \
-        }
+        } \
+        if (shift_x) dst += shift_x;
 
+        uint8_t* src_u0 = src_u;
+        uint8_t* src_v0 = src_v;
         CONVERT_ROW
 
         src_u = src_u0;
