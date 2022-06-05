@@ -1,5 +1,6 @@
 // Copyright (C) 2021 DEV47APPS, github.com/dev47apps
 #pragma once
+#pragma warning(disable : 4505)
 
 #define CONTROL    0x02020101
 #define MAX_WIDTH  1920
@@ -14,15 +15,25 @@
 
 #define VIDEO_MAP_SIZE  (sizeof(VideoHeader) + RGB_BUFFER_SIZE(MAX_WIDTH,MAX_HEIGHT))
 
+#define SAMPLE_BITS    16
+#define OBS_AUDIO_FMT  AUDIO_FORMAT_16BIT
+#define MAX_CHANNELZ   2
+#define DEF_FRAMES     1024
+#define CHUNKS_COUNT   2
+#define AUDIO_DATA_SIZE  ((SAMPLE_BITS/8) * DEF_FRAMES * MAX_CHANNELZ)
+#define AUDIO_MAP_SIZE   (sizeof(AudioHeader) + (AUDIO_DATA_SIZE * CHUNKS_COUNT))
 
-#define AUDIO_MAP_NAME L"DroidCamOBS_AudioOut0"
-
+#define AUDIO_MAP_NAME     L"DroidCamOBS_AudioOut0"
 #define VIDEO_MAP_NAME     L"DroidCamOBS_VideoOut0"
 #define VIDEO_WR_LOCK_NAME L"DroidCamOBS_VideoWr0"
 #define VIDEO_RD_LOCK_NAME L"DroidCamOBS_VideoRd0"
 
 #define REG_WEBCAM_SIZE_KEY  L"SOFTWARE\\DroidCam"
 #define REG_WEBCAM_SIZE_VAL  L"Size"
+
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
 
 /* Video Header */
 typedef struct {
@@ -34,9 +45,11 @@ typedef struct {
     int format;
 } DroidCamVideoInfo;
 
-typedef struct {
-    DroidCamVideoInfo info;
-    char reserved0[1024 - sizeof(DroidCamVideoInfo)];
+typedef union {
+    struct {
+        DroidCamVideoInfo info;
+    };
+    char pad[1024];
 } VideoHeader;
 
 /* Audio Header */
@@ -48,10 +61,17 @@ typedef struct {
     int channels;
 } DroidCamAudioInfo;
 
-typedef struct {
-    DroidCamAudioInfo info;
-    char reserved0[1024 - sizeof(DroidCamAudioInfo)];
+typedef union {
+    struct {
+        DroidCamAudioInfo info;
+        int data_valid;
+    };
+    char pad[1024];
 } AudioHeader;
+
+#ifdef    __cplusplus
+} // "C"
+#endif
 
 // See also dshow CRefTime
 #define MS_TO_100NS_UNITS(ms) ((ms) * (UNITS / MILLI_SEC))

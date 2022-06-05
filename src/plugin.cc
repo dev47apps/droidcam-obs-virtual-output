@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021 DEV47APPS, github.com/dev47apps
+Copyright (C) 2022 DEV47APPS, github.com/dev47apps
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -62,6 +62,8 @@ struct droidcam_output_plugin {
 
     LPVOID pVideoMem;
     HANDLE hVideoMapping;
+    HANDLE hVideoWrLock;
+    HANDLE hVideoRdLock;
 
     LPVOID pAudioMem;
     HANDLE hAudioMapping;
@@ -87,7 +89,6 @@ static void video_conversion(droidcam_output_plugin *plugin) {
     int dst_h = plugin->webcam_h;
 
     if (src_w == dst_w && src_h == dst_h) {
-        dlog("exact video match... nice");
         plugin->shift_x = 0;
         plugin->shift_y = 0;
         plugin->video_conv.width = dst_w;
@@ -186,7 +187,7 @@ static void *control_thread(void *data) {
             if (audio_ok && video_ok)
                 continue;
 
-            // output conversion needs to be updated
+            dlog("output conversion needs to be updated");
             obs_output_end_data_capture(plugin->output);
 
             // todo: this can probably be improved..
@@ -226,7 +227,7 @@ static void *control_thread(void *data) {
 
         plugin->have_video = have_video;
         plugin->have_audio = have_audio;
-        memset(plugin->pAudioData, 0, 1024 * 2 * 2); // FIXME --
+        memset(plugin->pAudioData, 0, AUDIO_DATA_SIZE * CHUNKS_COUNT);
         clear_yuyv(plugin->pVideoData, MAX_WIDTH*MAX_HEIGHT*2, 0x80008000);
         obs_output_begin_data_capture(plugin->output, 0);
     }
@@ -283,9 +284,9 @@ static bool output_start(void *data) {
     plugin->have_audio = false;
     plugin->default_sample_rate = sample_rate;
     plugin->default_speaker_layout = to_speaker_layout(channels);
-    plugin->audio_conv.format = AUDIO_FORMAT_16BIT;
-    plugin->audio_conv.samples_per_sec = 44100;
-    plugin->audio_conv.speakers = SPEAKERS_MONO;
+    plugin->audio_conv.format = OBS_AUDIO_FMT;
+    plugin->audio_conv.samples_per_sec = sample_rate;
+    plugin->audio_conv.speakers = plugin->default_speaker_layout;
     obs_output_set_audio_conversion(plugin->output, &plugin->audio_conv);
 
     os_event_reset(plugin->stop_signal);
@@ -320,6 +321,8 @@ static void output_destroy(void *data) {
             CloseHandle(plugin->hAudioMapping);
         }
 
+        if (plugin->hVideoWrLock) CloseHandle(plugin->hVideoWrLock);
+        if (plugin->hVideoRdLock) CloseHandle(plugin->hVideoRdLock);
         #endif
 
         os_event_destroy(plugin->stop_signal);
@@ -333,7 +336,7 @@ static void *output_create(obs_data_t *settings, obs_output_t *output) {
     plugin->output = output;
     os_event_init(&plugin->stop_signal, OS_EVENT_TYPE_MANUAL);
 
-    #ifdef _WIN32
+#ifdef _WIN32
 {
     const LPCWSTR name = VIDEO_MAP_NAME;
     DWORD size = VIDEO_MAP_SIZE;
@@ -342,8 +345,11 @@ static void *output_create(obs_data_t *settings, obs_output_t *output) {
     if (CreateSharedMem(&plugin->hVideoMapping, &plugin->pVideoMem, name, size)) {
         dlog("mapped %8d bytes @ %p [video]", size, plugin->pVideoMem);
         plugin->pVideoHeader = (VideoHeader *) plugin->pVideoMem;
-        plugin->pVideoData   = (BYTE*)plugin->pVideoMem + sizeof(VideoHeader);
+        plugin->pVideoData   = (BYTE*)(plugin->pVideoHeader + 1);
     }
+
+    plugin->hVideoWrLock = CreateEventW( NULL, TRUE, TRUE, VIDEO_WR_LOCK_NAME );
+    plugin->hVideoRdLock = CreateEventW( NULL, TRUE, TRUE, VIDEO_RD_LOCK_NAME );
 }
 {
     const LPCWSTR name = AUDIO_MAP_NAME;
@@ -356,7 +362,7 @@ static void *output_create(obs_data_t *settings, obs_output_t *output) {
         plugin->pAudioData   = (BYTE*)plugin->pAudioMem + sizeof(AudioHeader);
     }
 }
-    #endif // _WIN32
+#endif // _WIN32
 
     UNUSED_PARAMETER(settings);
     return plugin;
@@ -367,11 +373,19 @@ static void on_video(void *data, struct video_data *frame) {
     if (plugin->pVideoData && plugin->have_video) {
         uint8_t* dst = plugin->pVideoData;
 
-        // FIXME lock()
+        #ifdef _WIN32
+        if (plugin->hVideoWrLock) ResetEvent( plugin->hVideoWrLock );
+        if (plugin->hVideoRdLock) WaitForSingleObject(plugin->hVideoRdLock, 5);
+        #endif
+
         map_yuv420_yuyv(frame->data, frame->linesize, dst,
             plugin->shift_x, plugin->shift_y,
             plugin->webcam_w, plugin->webcam_h,
             plugin->video_conv.width, plugin->video_conv.height);
+
+        #ifdef _WIN32
+        if (plugin->hVideoWrLock) SetEvent(plugin->hVideoWrLock);
+        #endif
     }
 }
 
