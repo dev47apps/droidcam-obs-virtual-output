@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <util/threading.h>
 #include <util/platform.h>
 #include "plugin.h"
+#include "queue.h"
 #include "structs.h"
 
 const char *PluginVer  = "001";
@@ -45,11 +46,13 @@ struct droidcam_output_plugin {
     bool have_video;
     bool have_audio;
 
+    int audio_frame_size_bytes;
     struct audio_convert_info audio_conv;
     struct video_scale_info   video_conv;
 
     //
     obs_output_t *output;
+    pthread_t audio_thread;
     pthread_t control_thread;
     os_event_t *stop_signal;
 
@@ -67,6 +70,7 @@ struct droidcam_output_plugin {
 
     LPVOID pAudioMem;
     HANDLE hAudioMapping;
+    DataQueue audioDataQueue;
     #endif
 };
 
@@ -79,6 +83,60 @@ static inline enum speaker_layout to_speaker_layout(int channels) {
     default:
         return SPEAKERS_UNKNOWN;
     }
+}
+
+static inline int to_channels(enum speaker_layout speaker_layout) {
+    switch (speaker_layout) {
+    case SPEAKERS_STEREO:
+        return 2;
+    case SPEAKERS_MONO:
+    default:
+        return 1;
+    }
+}
+
+#define AUDIO_CUSHION 4
+
+static void *audio_thread(void *data) {
+    droidcam_output_plugin *plugin = reinterpret_cast<droidcam_output_plugin *>(data);
+    dlog("audio_thread start");
+
+    int waiting = 0;
+    while ((os_event_timedwait(plugin->stop_signal, 5) != 0) && (plugin->pAudioData))
+    {
+        if (!plugin->have_audio) {
+            if (!waiting) waiting = 1;
+            continue;
+        }
+
+        if (waiting) {
+            if (plugin->audioDataQueue.readyQueue.size() < AUDIO_CUSHION)
+                continue;
+
+            waiting = 0;
+        }
+        else {
+            if (plugin->audioDataQueue.readyQueue.size() == 0)
+                waiting = 1;
+        }
+
+        if (plugin->pAudioHeader->data_valid)
+            continue;
+
+        plugin->audioDataQueue.lock();
+        DataPacket *packet = plugin->audioDataQueue.pull_ready_packet();
+        if (packet) {
+            memcpy(plugin->pAudioData, packet->data, packet->used);
+            plugin->pAudioHeader->data_valid = 1;
+            plugin->audioDataQueue.push_empty_packet(packet);
+        } else {
+            dlog("missed frame");
+        }
+        plugin->audioDataQueue.unlock();
+    }
+
+    dlog("audio_thread end");
+    return 0;
 }
 
 static void video_conversion(droidcam_output_plugin *plugin) {
@@ -141,6 +199,10 @@ static void *control_thread(void *data) {
             ah->info.control == CONTROL
             && ah->info.checksum == (ah->info.sample_rate ^ ah->info.channels);
 
+        //dlog("audio queue size: %d / %d",
+        //    (int) plugin->audioDataQueue.emptyQueue.size(),
+        //    (int) plugin->audioDataQueue.readyQueue.size());
+
         if (!have_video && !have_audio) {
             if (obs_output_active(plugin->output)) {
                 dlog("webcam became inactive");
@@ -199,13 +261,14 @@ static void *control_thread(void *data) {
         }
 
         if (have_video)
-            ilog("webcam video active %dx%d %dfps",
+            ilog("webcam video active %dx%d %dfps, video_ok=%d",
                 webcam_w, webcam_h,
-                (int)(RefTime::UNITS / webcam_interval));
+                (int)(RefTime::UNITS / webcam_interval),
+                (int) video_ok);
 
         if (have_audio)
-            ilog("webcam audio active %d Hz %d channels",
-                webcam_audio_rate, webcam_speaker_layout);
+            ilog("webcam audio active %d Hz %d channels, audio_ok=%d",
+                webcam_audio_rate, webcam_speaker_layout, (int) audio_ok);
 
         if (!video_ok) {
             plugin->webcam_w = webcam_w;
@@ -215,11 +278,12 @@ static void *control_thread(void *data) {
         }
 
         if (!audio_ok) {
+            plugin->audio_frame_size_bytes = (SAMPLE_BITS/8) * to_channels(webcam_speaker_layout);
             plugin->audio_conv.speakers = webcam_speaker_layout;
             plugin->audio_conv.samples_per_sec = webcam_audio_rate;
 
             if (plugin->audio_conv.speakers == SPEAKERS_UNKNOWN) {
-                elog("WARN: unkown webcam speaker layout: %d", plugin->audio_conv.speakers);
+                elog("WARN: unknown webcam speaker layout: %d", plugin->audio_conv.speakers);
                 have_audio = false;
             }
             obs_output_set_audio_conversion(plugin->output, &plugin->audio_conv);
@@ -227,6 +291,9 @@ static void *control_thread(void *data) {
 
         plugin->have_video = have_video;
         plugin->have_audio = have_audio;
+        plugin->audioDataQueue.lock();
+        plugin->audioDataQueue.clear();
+        plugin->audioDataQueue.unlock();
         memset(plugin->pAudioData, 0, AUDIO_DATA_SIZE * CHUNKS_COUNT);
         clear_yuyv(plugin->pVideoData, MAX_WIDTH*MAX_HEIGHT*2, 0x80008000);
         obs_output_begin_data_capture(plugin->output, 0);
@@ -241,6 +308,7 @@ static void output_stop(void *data, uint64_t ts) {
 
     dlog("output_stop");
     os_event_signal(plugin->stop_signal);
+    pthread_join(plugin->audio_thread, NULL);
     pthread_join(plugin->control_thread, NULL);
     obs_output_end_data_capture(plugin->output);
 
@@ -284,12 +352,14 @@ static bool output_start(void *data) {
     plugin->have_audio = false;
     plugin->default_sample_rate = sample_rate;
     plugin->default_speaker_layout = to_speaker_layout(channels);
+    plugin->audio_frame_size_bytes = (SAMPLE_BITS/8) * channels;
     plugin->audio_conv.format = OBS_AUDIO_FMT;
     plugin->audio_conv.samples_per_sec = sample_rate;
     plugin->audio_conv.speakers = plugin->default_speaker_layout;
     obs_output_set_audio_conversion(plugin->output, &plugin->audio_conv);
 
     os_event_reset(plugin->stop_signal);
+    pthread_create(&plugin->audio_thread, NULL, audio_thread, plugin);
     pthread_create(&plugin->control_thread, NULL, control_thread, plugin);
     return true;
 }
@@ -370,31 +440,47 @@ static void *output_create(obs_data_t *settings, obs_output_t *output) {
 
 static void on_video(void *data, struct video_data *frame) {
     droidcam_output_plugin *plugin = reinterpret_cast<droidcam_output_plugin *>(data);
-    if (plugin->pVideoData && plugin->have_video) {
-        uint8_t* dst = plugin->pVideoData;
-
+    if (plugin->have_video && plugin->pVideoData) {
         #ifdef _WIN32
-        if (plugin->hVideoWrLock) ResetEvent( plugin->hVideoWrLock );
-        if (plugin->hVideoRdLock) WaitForSingleObject(plugin->hVideoRdLock, 5);
-        #endif
-
-        map_yuv420_yuyv(frame->data, frame->linesize, dst,
-            plugin->shift_x, plugin->shift_y,
-            plugin->webcam_w, plugin->webcam_h,
-            plugin->video_conv.width, plugin->video_conv.height);
-
-        #ifdef _WIN32
-        if (plugin->hVideoWrLock) SetEvent(plugin->hVideoWrLock);
+        if (plugin->hVideoWrLock && plugin->hVideoRdLock) {
+            ResetEvent(plugin->hVideoWrLock);
+            if (WaitForSingleObject(plugin->hVideoRdLock, 5) == 0)
+            {
+                uint8_t* dst = plugin->pVideoData;
+                map_yuv420_yuyv(frame->data, frame->linesize, dst,
+                    plugin->shift_x, plugin->shift_y,
+                    plugin->webcam_w, plugin->webcam_h,
+                    plugin->video_conv.width, plugin->video_conv.height);
+            }
+            else
+            {
+                dlog("video lock fail/timeout: frame dropped");
+            }
+            SetEvent(plugin->hVideoWrLock);
+        }
         #endif
     }
 }
 
 static void on_audio(void *data, struct audio_data *frame) {
     droidcam_output_plugin *plugin = reinterpret_cast<droidcam_output_plugin *>(data);
-    if (plugin->pAudioData && plugin->have_audio) {
-        // FIXME hmm.....
-        dlog("on_audio: %p frames=%d, ts=%ld",
-            frame->data[0], frame->frames, frame->timestamp);
+    if (plugin->have_audio) {
+
+        #ifdef _WIN32
+        if (plugin->audioDataQueue.readyQueue.size() < AUDIO_CUSHION) {
+            const int frames = frame->frames > DEF_FRAMES ? DEF_FRAMES : frame->frames;
+            const int size = frames * plugin->audio_frame_size_bytes;
+
+            plugin->audioDataQueue.lock();
+            DataPacket *packet = plugin->audioDataQueue.pull_empty_packet(size);
+            memcpy(packet->data, frame->data[0], size);
+            packet->used = size;
+            // packet->pts = frame->timestamp;
+            plugin->audioDataQueue.push_ready_packet(packet);
+            plugin->audioDataQueue.unlock();
+        }
+        #endif // _WIN32
+
     }
 }
 
