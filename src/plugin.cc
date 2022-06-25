@@ -21,8 +21,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "queue.h"
 #include "structs.h"
 
+#ifndef DROIDCAM_OVERRIDE
+#include <QtWidgets/QAction>
+#include <QtWidgets/QMessageBox>
+#include <QtWidgets/QMainWindow>
+#include "obs-frontend-api.h"
+#endif
+
 const char *PluginVer  = "001";
 const char *PluginName = "DroidCam Virtual Output";
+obs_output_t *droidcam_virtual_output = NULL;
 
 void map_yuv420_yuyv(uint8_t** data, uint32_t *linesize, uint8_t* dst,
     int shift_x, int shift_y,
@@ -305,7 +313,6 @@ static void *control_thread(void *data) {
 
 static void output_stop(void *data, uint64_t ts) {
     droidcam_output_plugin *plugin = reinterpret_cast<droidcam_output_plugin *>(data);
-
     dlog("output_stop");
     os_event_signal(plugin->stop_signal);
     pthread_join(plugin->audio_thread, NULL);
@@ -369,7 +376,6 @@ static void output_destroy(void *data) {
 
     dlog("output_destroy");
     if (plugin) {
-
         if (os_event_try(plugin->stop_signal) != 0) {
             output_stop(data, 0);
         }
@@ -511,11 +517,61 @@ bool obs_module_load(void) {
     droidcam_virtual_output_info.raw_audio = on_audio,
     obs_register_output(&droidcam_virtual_output_info);
 
-    #ifdef DROIDCAM_OVERRIDE
     obs_data_t *obs_settings = obs_data_create();
+
+    #ifdef DROIDCAM_OVERRIDE
     obs_data_set_bool(obs_settings, "vcamEnabled", true);
     obs_apply_private_data(obs_settings);
+    #else
+    QMainWindow *main_window = (QMainWindow *)obs_frontend_get_main_window();
+    QAction *tools_menu_action = (QAction*)obs_frontend_add_tools_menu_qaction(PluginName);
+    tools_menu_action->setCheckable(true);
+    tools_menu_action->setChecked(false);
+
+    tools_menu_action->connect(tools_menu_action, &QAction::triggered, [=] (bool checked) {
+        if (!droidcam_virtual_output) {
+            droidcam_virtual_output = obs_output_create(
+                "droidcam_virtual_output", "DroidCamVirtualOutput", obs_settings, NULL);
+            ilog("droidcam_virtual_output=%p", droidcam_virtual_output);
+        }
+
+        if (checked) {
+            if (!obs_output_start(droidcam_virtual_output)) {
+                obs_output_force_stop(droidcam_virtual_output);
+                tools_menu_action->setChecked(false);
+
+                QMessageBox mb(QMessageBox::Warning, PluginName,
+                    obs_module_text("OutputStartFailed"), QMessageBox::Ok, main_window);
+                mb.setButtonText(QMessageBox::Ok, "OK");
+                mb.exec();
+            }
+        }
+        else {
+            // Force stop since we may not be actively capturing data,
+            // if the webcam is not in use.
+            obs_output_force_stop(droidcam_virtual_output);
+        }
+    });
+
+    // todo - investigate: there seems to be a race condition in obs_graphics_thread,
+    // causing a crash when exiting while the output is enabled and capturing.
+    // I'm guessing the pthread_joins here are creating delays and triggering it.
+    // Comment this out to reproduce.
+    obs_frontend_add_event_callback([] (enum obs_frontend_event event, void*) {
+        if (event == OBS_FRONTEND_EVENT_EXIT && droidcam_virtual_output)
+            obs_output_force_stop(droidcam_virtual_output);
+
+    }, NULL);
+
+    #endif // DROIDCAM_OVERRIDE
+
     obs_data_release(obs_settings);
-    #endif
     return true;
+}
+
+void obs_module_unload(void) {
+    if (droidcam_virtual_output) {
+        dlog("release %p", droidcam_virtual_output);
+        obs_output_release(droidcam_virtual_output);
+    }
 }
