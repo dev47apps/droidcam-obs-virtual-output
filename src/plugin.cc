@@ -213,7 +213,7 @@ static void *control_thread(void *data) {
 
         if (!have_video && !have_audio) {
             if (obs_output_active(plugin->output)) {
-                dlog("webcam became inactive");
+                ilog("webcam became inactive");
                 obs_output_end_data_capture(plugin->output);
             }
 
@@ -340,7 +340,7 @@ static bool output_start(void *data) {
     struct obs_video_info ovi;
     obs_get_video_info(&ovi);
     int interval = ovi.fps_den * RefTime::UNITS / ovi.fps_num;
-    ilog("output_start: video %dx%d interval %lld format %d", width, height, interval, format);
+    dlog("output_start: video %dx%d interval %lld format %d", width, height, interval, format);
 
     plugin->have_video = false;
     plugin->default_w = width;
@@ -354,7 +354,7 @@ static bool output_start(void *data) {
     audio_t *audio = obs_output_audio(plugin->output);
     int channels = audio_output_get_channels(audio);
     int sample_rate = (int) audio_output_get_sample_rate(audio);
-    ilog("            : audio channels %d sample_rate %d", channels, sample_rate);
+    dlog("            : audio channels %d sample_rate %d", channels, sample_rate);
 
     plugin->have_audio = false;
     plugin->default_sample_rate = sample_rate;
@@ -384,7 +384,7 @@ static void output_destroy(void *data) {
         plugin->pVideoData = NULL;
         plugin->pVideoHeader = NULL;
         if (plugin->pVideoMem) {
-            dlog("closing shared memory [video]");
+            ilog("closing shared memory [video]");
             UnmapViewOfFile(plugin->pVideoMem);
             CloseHandle(plugin->hVideoMapping);
         }
@@ -392,7 +392,7 @@ static void output_destroy(void *data) {
         plugin->pAudioData = NULL;
         plugin->pAudioHeader = NULL;
         if (plugin->pAudioMem) {
-            dlog("closing shared memory [audio]");
+            ilog("closing shared memory [audio]");
             UnmapViewOfFile(plugin->pAudioMem);
             CloseHandle(plugin->hAudioMapping);
         }
@@ -419,7 +419,7 @@ static void *output_create(obs_data_t *settings, obs_output_t *output) {
     ALIGN_SIZE(size, ALIGNMENT);
 
     if (CreateSharedMem(&plugin->hVideoMapping, &plugin->pVideoMem, name, size)) {
-        dlog("mapped %8d bytes @ %p [video]", size, plugin->pVideoMem);
+        ilog("mapped %8d bytes @ %p [video]", size, plugin->pVideoMem);
         plugin->pVideoHeader = (VideoHeader *) plugin->pVideoMem;
         plugin->pVideoData   = (BYTE*)(plugin->pVideoHeader + 1);
     }
@@ -433,7 +433,7 @@ static void *output_create(obs_data_t *settings, obs_output_t *output) {
     ALIGN_SIZE(size, ALIGNMENT);
 
     if (CreateSharedMem(&plugin->hAudioMapping, &plugin->pAudioMem, name, size)) {
-        dlog("mapped %8d bytes @ %p [audio]", size, plugin->pAudioMem);
+        ilog("mapped %8d bytes @ %p [audio]", size, plugin->pAudioMem);
         plugin->pAudioHeader = (AudioHeader *) plugin->pAudioMem;
         plugin->pAudioData   = (BYTE*)plugin->pAudioMem + sizeof(AudioHeader);
     }

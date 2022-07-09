@@ -1,9 +1,9 @@
-// Copyright (C) 2021 DEV47APPS, github.com/dev47apps
+// Copyright (C) 2022 DEV47APPS, github.com/dev47apps
 #pragma once
 #include <obs-module.h>
 
 #define xlog(log_level, format, ...) \
-        blog(log_level, "[DroidcamVirtualOutput] " format, ##__VA_ARGS__)
+        blog(log_level, "[DroidcamVirtualOut] " format, ##__VA_ARGS__)
 
 #ifdef DEBUG
 #define dlog(format, ...) xlog(LOG_INFO, format, ##__VA_ARGS__)

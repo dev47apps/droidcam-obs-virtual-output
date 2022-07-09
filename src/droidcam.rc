@@ -1,0 +1,22 @@
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "DEV47APPS"
+      VALUE "FileDescription", "OBS Virtual Output Plugin"
+      VALUE "InternalName", "droidcam-virtual-output.dll"
+      VALUE "OriginalFilename", "droidcam-virtual-output.dll"
+      VALUE "ProductName", "DroidCam"
+      VALUE "ProductVersion", "7"
+      VALUE "LegalCopyright", "DEV47APPS, 2022"
+    END
+  END
+
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 0x04B0
+  END
+END
