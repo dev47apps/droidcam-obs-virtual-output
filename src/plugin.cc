@@ -21,14 +21,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "queue.h"
 #include "structs.h"
 
-#ifndef DROIDCAM_OVERRIDE
-#include <QtWidgets/QAction>
+#if DROIDCAM_OVERRIDE==0
+#include <QtGui/QAction>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QMainWindow>
 #include "obs-frontend-api.h"
 #endif
 
-const char *PluginVer  = "001";
+const char *PluginVer  = "011";
 const char *PluginName = "DroidCam Virtual Output";
 obs_output_t *droidcam_virtual_output = NULL;
 
@@ -403,6 +403,7 @@ static void output_destroy(void *data) {
 
         os_event_destroy(plugin->stop_signal);
         delete plugin;
+        ilog("plugin destroyed");
     }
 }
 
@@ -517,12 +518,17 @@ bool obs_module_load(void) {
     droidcam_virtual_output_info.raw_audio = on_audio,
     obs_register_output(&droidcam_virtual_output_info);
 
-    obs_data_t *obs_settings = obs_data_create();
 
-    #ifdef DROIDCAM_OVERRIDE
+
+    #if DROIDCAM_OVERRIDE
+
+    obs_data_t *obs_settings = obs_data_create();
     obs_data_set_bool(obs_settings, "vcamEnabled", true);
     obs_apply_private_data(obs_settings);
+    obs_data_release(obs_settings);
+
     #else
+
     QMainWindow *main_window = (QMainWindow *)obs_frontend_get_main_window();
     QAction *tools_menu_action = (QAction*)obs_frontend_add_tools_menu_qaction(PluginName);
     tools_menu_action->setCheckable(true);
@@ -530,9 +536,11 @@ bool obs_module_load(void) {
 
     tools_menu_action->connect(tools_menu_action, &QAction::triggered, [=] (bool checked) {
         if (!droidcam_virtual_output) {
+            obs_data_t *obs_settings = obs_data_create();
             droidcam_virtual_output = obs_output_create(
                 "droidcam_virtual_output", "DroidCamVirtualOutput", obs_settings, NULL);
             ilog("droidcam_virtual_output=%p", droidcam_virtual_output);
+            obs_data_release(obs_settings);
         }
 
         if (checked) {
@@ -558,20 +566,17 @@ bool obs_module_load(void) {
     // I'm guessing the pthread_joins here are creating delays and triggering it.
     // Comment this out to reproduce.
     obs_frontend_add_event_callback([] (enum obs_frontend_event event, void*) {
-        if (event == OBS_FRONTEND_EVENT_EXIT && droidcam_virtual_output)
+        if (event == OBS_FRONTEND_EVENT_EXIT && droidcam_virtual_output) {
             obs_output_force_stop(droidcam_virtual_output);
+            obs_output_release(droidcam_virtual_output);
+            droidcam_virtual_output = NULL;
+        }
 
     }, NULL);
 
     #endif // DROIDCAM_OVERRIDE
-
-    obs_data_release(obs_settings);
     return true;
 }
 
 void obs_module_unload(void) {
-    if (droidcam_virtual_output) {
-        dlog("release %p", droidcam_virtual_output);
-        obs_output_release(droidcam_virtual_output);
-    }
 }
