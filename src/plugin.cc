@@ -403,6 +403,7 @@ static void output_destroy(void *data) {
 
         os_event_destroy(plugin->stop_signal);
         delete plugin;
+        ilog("plugin destroyed");
     }
 }
 
@@ -558,8 +559,11 @@ bool obs_module_load(void) {
     // I'm guessing the pthread_joins here are creating delays and triggering it.
     // Comment this out to reproduce.
     obs_frontend_add_event_callback([] (enum obs_frontend_event event, void*) {
-        if (event == OBS_FRONTEND_EVENT_EXIT && droidcam_virtual_output)
+        if (event == OBS_FRONTEND_EVENT_EXIT && droidcam_virtual_output) {
             obs_output_force_stop(droidcam_virtual_output);
+            obs_output_release(droidcam_virtual_output);
+            droidcam_virtual_output = NULL;
+        }
 
     }, NULL);
 
@@ -570,8 +574,4 @@ bool obs_module_load(void) {
 }
 
 void obs_module_unload(void) {
-    if (droidcam_virtual_output) {
-        dlog("release %p", droidcam_virtual_output);
-        obs_output_release(droidcam_virtual_output);
-    }
 }
