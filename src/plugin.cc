@@ -39,7 +39,7 @@ const char *PluginName = "DroidCam Virtual Output";
 obs_output_t *droidcam_virtual_output = NULL;
 
 void map_yuv420_yuyv(uint8_t** data, uint32_t *linesize, uint8_t* dst,
-    int shift_x, int shift_y,
+    int shift_x, int shift_y, int is_aligned_128b,
     const int dest_width, const int dest_height,
     const int width, const int height);
 
@@ -51,6 +51,7 @@ struct droidcam_output_plugin {
     int default_w, default_h;
     int default_interval;
     int shift_x, shift_y;
+    int is_aligned_128b;
 
     // audio
     int default_sample_rate;
@@ -187,8 +188,16 @@ static void video_conversion(droidcam_output_plugin *plugin) {
         shift_y = (dst_h0 - dst_h) / 2;
     }
 
-    ilog("video scaling: %dx%d -> %dx%d at %d,%d",
-        src_w, src_h, dst_w, dst_h, shift_x, shift_y);
+    // force even amounts
+    shift_x &= ~1;
+    shift_y &= ~1;
+    dst_w &= ~1;
+    dst_h &= ~1;
+
+    ilog("video scaling: %dx%d -> %dx%d -> %dx%d at %d,%d",
+        src_w, src_h, dst_w, dst_h,
+        plugin->webcam_w, plugin->webcam_h,
+        shift_x, shift_y);
     plugin->video_conv.width = dst_w;
     plugin->video_conv.height = dst_h;
     plugin->shift_x = shift_x;
@@ -262,8 +271,8 @@ static void *control_thread(void *data) {
         }
 
         const bool video_ok =
-            (webcam_w - plugin->shift_x - plugin->shift_x - plugin->video_conv.width < 4) &&
-            (webcam_h - plugin->shift_y - plugin->shift_y - plugin->video_conv.height < 4);
+            (webcam_w - plugin->shift_x - plugin->shift_x - plugin->video_conv.width <= 4) &&
+            (webcam_h - plugin->shift_y - plugin->shift_y - plugin->video_conv.height <= 4);
 
         const bool audio_ok =
             plugin->audio_conv.speakers == webcam_speaker_layout &&
@@ -298,6 +307,7 @@ static void *control_thread(void *data) {
             plugin->webcam_w = webcam_w;
             plugin->webcam_h = webcam_h;
             video_conversion(plugin);
+            plugin->is_aligned_128b = (plugin->video_conv.width % 16 == 0);
             obs_output_set_video_conversion(plugin->output, &plugin->video_conv);
         }
 
@@ -363,12 +373,15 @@ static bool output_start(void *data) {
     #endif
 
     plugin->have_video = false;
+    plugin->shift_x = 0;
+    plugin->shift_y = 0;
     plugin->default_w = width;
     plugin->default_h = height;
     plugin->default_interval = interval;
     plugin->video_conv.format = VIDEO_FORMAT_I420;
     plugin->video_conv.width  = width;
     plugin->video_conv.height = height;
+    plugin->is_aligned_128b = (width % 16 == 0);
     obs_output_set_video_conversion(plugin->output, &plugin->video_conv);
 
     audio_t *audio = obs_output_audio(plugin->output);
@@ -476,6 +489,7 @@ static void on_video(void *data, struct video_data *frame) {
                 uint8_t* dst = plugin->pVideoData;
                 map_yuv420_yuyv(frame->data, frame->linesize, dst,
                     plugin->shift_x, plugin->shift_y,
+                    plugin->is_aligned_128b,
                     plugin->webcam_w, plugin->webcam_h,
                     plugin->video_conv.width, plugin->video_conv.height);
             }
