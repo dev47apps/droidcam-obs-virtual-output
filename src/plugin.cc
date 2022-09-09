@@ -15,6 +15,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include <cmath>
+#include <util/config-file.h>
 #include <util/threading.h>
 #include <util/platform.h>
 #include "plugin.h"
@@ -28,15 +29,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #else
 #include <QtWidgets/QAction>
 #endif
+#include <QtWidgets/QMenu>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QMainWindow>
 #include "obs-frontend-api.h"
 
+QAction *auto_start_action;
+QAction *tools_menu_action;
 #endif
 
 const char *PluginVer  = "011";
 const char *PluginName = "DroidCam Virtual Output";
 obs_output_t *droidcam_virtual_output = NULL;
+config_t *obs_config = NULL;
 
 void map_yuv420_yuyv(uint8_t** data, uint32_t *linesize, uint8_t* dst,
     int shift_x, int shift_y, int is_aligned_128b,
@@ -552,8 +557,6 @@ bool obs_module_load(void) {
     droidcam_virtual_output_info.raw_audio = on_audio,
     obs_register_output(&droidcam_virtual_output_info);
 
-
-
     #if DROIDCAM_OVERRIDE
 
     obs_data_t *obs_settings = obs_data_create();
@@ -563,8 +566,15 @@ bool obs_module_load(void) {
 
     #else
 
+    obs_config = obs_frontend_get_global_config();
+    config_set_default_bool(obs_config, "DroidCamVirtualOutput", "AutoStart", false);
+
     QMainWindow *main_window = (QMainWindow *)obs_frontend_get_main_window();
-    QAction *tools_menu_action = (QAction*)obs_frontend_add_tools_menu_qaction(PluginName);
+    QAction *action = (QAction*)obs_frontend_add_tools_menu_qaction(PluginName);
+    QMenu *menu = new QMenu();
+    action->setMenu(menu);
+
+    tools_menu_action = menu->addAction(obs_module_text("Active"));
     tools_menu_action->setCheckable(true);
     tools_menu_action->setChecked(false);
 
@@ -598,6 +608,14 @@ bool obs_module_load(void) {
         }
     });
 
+    auto_start_action = menu->addAction(obs_module_text("AutoStart"));
+    auto_start_action->setCheckable(true);
+    auto_start_action->setChecked(config_get_bool(obs_config, "DroidCamVirtualOutput", "AutoStart"));
+    auto_start_action->connect(auto_start_action, &QAction::triggered, [=] (bool checked) {
+        config_set_bool(obs_config, "DroidCamVirtualOutput", "AutoStart", checked);
+        config_save(obs_config);
+    });
+
     // todo - investigate: there seems to be a race condition in obs_graphics_thread,
     // causing a crash when exiting while the output is enabled and capturing.
     // I'm guessing the pthread_joins here are creating delays and triggering it.
@@ -607,6 +625,15 @@ bool obs_module_load(void) {
             obs_output_force_stop(droidcam_virtual_output);
             obs_output_release(droidcam_virtual_output);
             droidcam_virtual_output = NULL;
+            return;
+        }
+
+        if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
+            if (config_get_bool(obs_config, "DroidCamVirtualOutput", "AutoStart")) {
+                ilog("AutoStart Trigger");
+                tools_menu_action->activate(QAction::Trigger);
+            }
+
         }
 
     }, NULL);
