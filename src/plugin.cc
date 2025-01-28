@@ -38,7 +38,7 @@ QAction *auto_start_action;
 QAction *tools_menu_action;
 #endif
 
-const char *PluginVer  = "012";
+const char *PluginVer  = "020";
 const char *PluginName = "DroidCam Virtual Output";
 obs_output_t *droidcam_virtual_output = NULL;
 config_t *obs_config = NULL;
@@ -176,11 +176,16 @@ static void video_conversion(droidcam_output_plugin *plugin) {
 
     float src_ar = (float) src_w / (float) src_h;
     float dst_ar = (float) dst_w / (float) dst_h;
+
+    float h_ar = (float)dst_h / (float)src_h;
+    float w_ar = (float)dst_w / (float)src_w;
+
     if (abs(src_ar - dst_ar) < 0.01f) {
         // same aspect ratio
         shift_x = 0;
         shift_y = 0;
-    } else if ((src_h - dst_h) > (src_w - dst_w)) {
+
+    } else if (h_ar < w_ar) {
         const int dst_w0 = dst_w;
         dst_w = dst_h * src_w / src_h;
         shift_x = (dst_w0 - dst_w) / 2;
@@ -199,7 +204,7 @@ static void video_conversion(droidcam_output_plugin *plugin) {
     dst_w &= ~1;
     dst_h &= ~1;
 
-    ilog("video scaling: %dx%d -> %dx%d -> %dx%d at %d,%d",
+    ilog("video scaling: %dx%d -> %dx%d inside %dx%d at %d,%d",
         src_w, src_h, dst_w, dst_h,
         plugin->webcam_w, plugin->webcam_h,
         shift_x, shift_y);
