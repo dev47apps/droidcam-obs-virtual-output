@@ -38,7 +38,7 @@ QAction *auto_start_action;
 QAction *tools_menu_action;
 #endif
 
-const char *PluginVer  = "020";
+const char *PluginVer  = "021";
 const char *PluginName = "DroidCam Virtual Output";
 obs_output_t *droidcam_virtual_output = NULL;
 config_t *obs_config = NULL;

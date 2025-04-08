@@ -3,8 +3,8 @@
 #pragma warning(disable : 4505)
 
 #define CONTROL    0x02020101
-#define MAX_WIDTH  1920
-#define MAX_HEIGHT 1080
+#define MAX_WIDTH  3860
+#define MAX_HEIGHT 2160
 #define DEF_WIDTH  640
 #define DEF_HEIGHT 480
 
@@ -24,9 +24,9 @@
 #define AUDIO_MAP_SIZE   (sizeof(AudioHeader) + (AUDIO_DATA_SIZE * CHUNKS_COUNT))
 
 #define AUDIO_MAP_NAME     L"DroidCamOBS_AudioOut0"
-#define VIDEO_MAP_NAME     L"DroidCamOBS_VideoOut0"
-#define VIDEO_WR_LOCK_NAME L"DroidCamOBS_VideoWr0"
-#define VIDEO_RD_LOCK_NAME L"DroidCamOBS_VideoRd0"
+#define VIDEO_MAP_NAME     L"DroidCamOBS_VideoOut1"
+#define VIDEO_WR_LOCK_NAME L"DroidCamOBS_VideoWr1"
+#define VIDEO_RD_LOCK_NAME L"DroidCamOBS_VideoRd1"
 
 #define REG_WEBCAM_SIZE_KEY  L"SOFTWARE\\DroidCam"
 #define REG_WEBCAM_SIZE_VAL  L"Size"
