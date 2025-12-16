@@ -5,8 +5,8 @@
 #define CONTROL    0x02020101
 #define MAX_WIDTH  3860
 #define MAX_HEIGHT 2160
-#define DEF_WIDTH  640
-#define DEF_HEIGHT 480
+#define DEF_WIDTH  1280
+#define DEF_HEIGHT 720
 
 #define RGB_BUFFER_SIZE(w,h) (w*h*3)
 

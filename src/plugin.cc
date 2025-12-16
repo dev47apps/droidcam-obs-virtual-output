@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2022 DEV47APPS, github.com/dev47apps
+Copyright (C) 2025 DEV47APPS, github.com/dev47apps
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -24,21 +24,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #if DROIDCAM_OVERRIDE==0
 
-#if LIBOBS_API_MAJOR_VER==28
-#include <QtGui/QAction>
-#else
-#include <QtWidgets/QAction>
-#endif
-#include <QtWidgets/QMenu>
-#include <QtWidgets/QMessageBox>
-#include <QtWidgets/QMainWindow>
+#include <QAction>
+#include <QMenu>
+#include <QMessageBox>
+#include <QMainWindow>
 #include "obs-frontend-api.h"
 
 QAction *auto_start_action;
 QAction *tools_menu_action;
 #endif
 
-const char *PluginVer  = "021";
+const char *PluginVer  = "022";
 const char *PluginName = "DroidCam Virtual Output";
 obs_output_t *droidcam_virtual_output = NULL;
 config_t *obs_config = NULL;
@@ -570,8 +566,9 @@ bool obs_module_load(void) {
     obs_data_release(obs_settings);
 
     #else
+    blog(LOG_INFO, "[droidcam-virtual-output] module loaded release %s", PluginVer);
 
-    obs_config = obs_frontend_get_global_config();
+    obs_config = obs_frontend_get_profile_config();
     config_set_default_bool(obs_config, "DroidCamVirtualOutput", "AutoStart", false);
 
     QMainWindow *main_window = (QMainWindow *)obs_frontend_get_main_window();
